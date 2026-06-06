@@ -29,3 +29,18 @@ be **public** for the anonymous pull to succeed.
 ```sh
 pct exec <CTID> -- bash -lc 'cd /opt/automationstation && docker compose pull && docker compose up -d'
 ```
+
+## Update an existing install
+
+Pulls the latest image and recreates the container (your data is preserved):
+
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/abarbarich/automation-station-deploy/main/proxmox-update.sh)"
+```
+
+Pin a specific version instead of `latest`:
+
+```sh
+IMAGE=ghcr.io/abarbarich/homeautomation:0.1.4 \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/abarbarich/automation-station-deploy/main/proxmox-update.sh)"
+```
