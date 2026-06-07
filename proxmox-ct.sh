@@ -15,7 +15,9 @@
 set -euo pipefail
 
 # ---- config (env-overridable) -----------------------------------------------
-HOSTNAME="${HOSTNAME:-automationstation}"
+# NB: not HOSTNAME — that's a bash built-in already set to the *host's* name, so a
+# ${HOSTNAME:-default} would inherit "proxmox" and never use our default.
+CT_HOSTNAME="${CT_HOSTNAME:-automationstation}"
 CORES="${CORES:-2}"
 RAM="${RAM:-2048}"           # MB
 DISK="${DISK:-10}"           # GB
@@ -39,7 +41,7 @@ CTID="${CTID:-$(pvesh get /cluster/nextid)}"
 pct status "$CTID" >/dev/null 2>&1 && die "CT $CTID already exists — set CTID=<free id>"
 
 c '1;35' "Automation Station — Proxmox CT installer"
-echo "  CTID=$CTID  host=$HOSTNAME  cores=$CORES  ram=${RAM}MB  disk=${DISK}GB"
+echo "  CTID=$CTID  host=$CT_HOSTNAME  cores=$CORES  ram=${RAM}MB  disk=${DISK}GB"
 echo "  net: bridge=$BRIDGE ip=$IP   rootfs: $STORAGE   image: $IMAGE"
 
 # ---- template ---------------------------------------------------------------
@@ -56,7 +58,7 @@ TEMPLATE_REF="$TEMPLATE_STORAGE:vztmpl/$TEMPLATE"
 # ---- create the container ---------------------------------------------------
 info "creating CT $CTID"
 pct create "$CTID" "$TEMPLATE_REF" \
-  --hostname "$HOSTNAME" \
+  --hostname "$CT_HOSTNAME" \
   --cores "$CORES" --memory "$RAM" --swap 512 \
   --rootfs "$STORAGE:$DISK" \
   --net0 "name=eth0,bridge=$BRIDGE,ip=$IP" \
@@ -111,7 +113,7 @@ YML
 CTIP="$(pct exec "$CTID" -- bash -lc "hostname -I | awk '{print \$1}'" 2>/dev/null | tr -d '[:space:]')"
 ok "Automation Station is running in CT $CTID"
 echo
-c '1;32' "  Open:  http://${CTIP:-<container-ip>}:8123      (or http://$HOSTNAME.local:8123)"
+c '1;32' "  Open:  http://${CTIP:-<container-ip>}:8123      (or http://$CT_HOSTNAME.local:8123)"
 echo "  Then create your admin account and add your devices."
 echo
 echo "  Manage:   pct enter $CTID     # shell into the container"
