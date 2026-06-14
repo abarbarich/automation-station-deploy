@@ -30,6 +30,11 @@ IMAGE="${IMAGE:-ghcr.io/abarbarich/automationstation:latest}"
 # `docker compose pull && up -d` on a schedule (no extra container, no Watchtower).
 AUTO_UPDATE="${AUTO_UPDATE:-no}"                       # "yes" to enable
 AUTO_UPDATE_SCHEDULE="${AUTO_UPDATE_SCHEDULE:-daily}"  # systemd OnCalendar (e.g. daily, weekly, *-*-* 04:00)
+# Pull a PRIVATE image: supply a token scoped to read:packages ONLY (it cannot read the
+# source repo). Passed at install time, never stored here. Public image? leave both blank.
+#   GHCR_USER=abarbarich GHCR_TOKEN=<read:packages PAT> bash proxmox-ct.sh
+GHCR_USER="${GHCR_USER:-abarbarich}"
+GHCR_TOKEN="${GHCR_TOKEN:-}"
 
 c() { printf '\033[%sm%s\033[0m\n' "$1" "$2"; }
 info() { c '1;36' "→ $*"; }
@@ -48,6 +53,7 @@ c '1;35' "Automation Station — Proxmox CT installer"
 echo "  CTID=$CTID  host=$CT_HOSTNAME  cores=$CORES  ram=${RAM}MB  disk=${DISK}GB"
 echo "  net: bridge=$BRIDGE ip=$IP   rootfs: $STORAGE   image: $IMAGE"
 case "$AUTO_UPDATE" in [yY]*|1|true) echo "  auto-update: ON ($AUTO_UPDATE_SCHEDULE)";; *) echo "  auto-update: off (set AUTO_UPDATE=yes to enable)";; esac
+[ -n "$GHCR_TOKEN" ] && echo "  ghcr: authenticating as $GHCR_USER (private image)" || echo "  ghcr: anonymous (set GHCR_USER/GHCR_TOKEN for a private image)"
 
 # ---- template ---------------------------------------------------------------
 info "ensuring a Debian 12 template is available"
@@ -92,6 +98,15 @@ pct exec "$CTID" -- bash -lc '
   curl -fsSL https://get.docker.com | sh >/dev/null
   systemctl enable --now docker >/dev/null 2>&1 || true
 '
+
+# Authenticate to GHCR for a private image. The token is piped over stdin into the CT
+# (never on a command line / never written to the public deploy repo), and Docker stores
+# it in the CT's /root/.docker/config.json so the auto-update timer can pull later too.
+if [ -n "$GHCR_TOKEN" ]; then
+  info "logging in to ghcr.io as $GHCR_USER (read:packages token)"
+  printf '%s' "$GHCR_TOKEN" | pct exec "$CTID" -- bash -lc "docker login ghcr.io -u '$GHCR_USER' --password-stdin" \
+    || die "ghcr.io login failed — check GHCR_USER and that GHCR_TOKEN has the read:packages scope"
+fi
 
 info "deploying Automation Station ($IMAGE)"
 pct exec "$CTID" -- bash -lc "
