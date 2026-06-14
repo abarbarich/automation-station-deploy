@@ -25,7 +25,11 @@ BRIDGE="${BRIDGE:-vmbr0}"
 IP="${IP:-dhcp}"             # "dhcp" or "192.168.1.50/24,gw=192.168.1.1"
 STORAGE="${STORAGE:-local-lvm}"      # rootfs storage
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"  # where CT templates live
-IMAGE="${IMAGE:-ghcr.io/abarbarich/homeautomation:latest}"
+IMAGE="${IMAGE:-ghcr.io/abarbarich/automationstation:latest}"
+# Opt-in scheduled auto-update: a systemd timer in the CT that runs
+# `docker compose pull && up -d` on a schedule (no extra container, no Watchtower).
+AUTO_UPDATE="${AUTO_UPDATE:-no}"                       # "yes" to enable
+AUTO_UPDATE_SCHEDULE="${AUTO_UPDATE_SCHEDULE:-daily}"  # systemd OnCalendar (e.g. daily, weekly, *-*-* 04:00)
 
 c() { printf '\033[%sm%s\033[0m\n' "$1" "$2"; }
 info() { c '1;36' "→ $*"; }
@@ -43,6 +47,7 @@ pct status "$CTID" >/dev/null 2>&1 && die "CT $CTID already exists — set CTID=
 c '1;35' "Automation Station — Proxmox CT installer"
 echo "  CTID=$CTID  host=$CT_HOSTNAME  cores=$CORES  ram=${RAM}MB  disk=${DISK}GB"
 echo "  net: bridge=$BRIDGE ip=$IP   rootfs: $STORAGE   image: $IMAGE"
+case "$AUTO_UPDATE" in [yY]*|1|true) echo "  auto-update: ON ($AUTO_UPDATE_SCHEDULE)";; *) echo "  auto-update: off (set AUTO_UPDATE=yes to enable)";; esac
 
 # ---- template ---------------------------------------------------------------
 info "ensuring a Debian 12 template is available"
@@ -99,6 +104,7 @@ services:
     container_name: automationstation
     restart: unless-stopped
     network_mode: host   # Matter/HomeKit + mDNS need the LAN's multicast
+    cgroup: host         # so the Monitor reports the CT's RAM limit, not the host's
     volumes:
       - as-data:/data
     environment:
@@ -108,6 +114,43 @@ volumes:
 YML
   cd /opt/automationstation && docker compose up -d
 "
+
+# ---- optional: scheduled auto-update ----------------------------------------
+# A plain systemd timer that pulls the new image and recreates the container on a
+# schedule — no Watchtower/extra container, no extra privilege (Docker is already
+# local to the CT). Data lives in the as-data volume, so it survives the recreate.
+case "$AUTO_UPDATE" in
+  [yY]*|1|true)
+    info "enabling scheduled auto-update ($AUTO_UPDATE_SCHEDULE)"
+    pct exec "$CTID" -- bash -lc "
+      set -e
+      cat > /etc/systemd/system/automationstation-update.service <<'UNIT'
+[Unit]
+Description=Automation Station auto-update (pull + recreate)
+Wants=network-online.target
+After=network-online.target docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/automationstation
+ExecStart=/usr/bin/docker compose pull
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStartPost=-/usr/bin/docker image prune -f
+UNIT
+      cat > /etc/systemd/system/automationstation-update.timer <<UNIT
+[Unit]
+Description=Automation Station auto-update schedule
+[Timer]
+OnCalendar=$AUTO_UPDATE_SCHEDULE
+Persistent=true
+RandomizedDelaySec=300
+[Install]
+WantedBy=timers.target
+UNIT
+      systemctl daemon-reload
+      systemctl enable --now automationstation-update.timer >/dev/null 2>&1
+    "
+    ;;
+esac
 
 # ---- done -------------------------------------------------------------------
 CTIP="$(pct exec "$CTID" -- bash -lc "hostname -I | awk '{print \$1}'" 2>/dev/null | tr -d '[:space:]')"
@@ -119,3 +162,7 @@ echo
 echo "  Manage:   pct enter $CTID     # shell into the container"
 echo "  Update:   pct exec $CTID -- bash -lc 'cd /opt/automationstation && docker compose pull && docker compose up -d'"
 echo "  Logs:     pct exec $CTID -- docker logs -f automationstation"
+case "$AUTO_UPDATE" in
+  [yY]*|1|true) echo "  Auto-update: ON — runs '$AUTO_UPDATE_SCHEDULE' (disable: pct exec $CTID -- systemctl disable --now automationstation-update.timer)";;
+  *)            echo "  Auto-update: off — re-run with AUTO_UPDATE=yes (+ optional AUTO_UPDATE_SCHEDULE=...) to enable a scheduled pull";;
+esac

@@ -12,7 +12,7 @@
 #
 # Options (env vars):
 #   CTID=210   bash ...   # target a specific container instead of auto-detecting
-#   IMAGE=ghcr.io/abarbarich/homeautomation:0.1.4 bash ...   # switch to a specific tag
+#   IMAGE=ghcr.io/abarbarich/automationstation:0.1.4 bash ...   # switch to a specific tag
 set -euo pipefail
 
 APP_DIR="/opt/automationstation"
